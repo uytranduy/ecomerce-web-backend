@@ -1,9 +1,12 @@
 import shopeModel from "../models/shop.model.js"
 import bcrypt from 'bcrypt'
-import crypto from 'crypto'
 import KeyTokenService from "./keytoken.service.js"
-import { createTokenPair } from "../auth/auth.utils.js"
+import { createTokenPair, verifyJWT } from "../auth/auth.utils.js"
 import { getIntoData } from "../utils/index.js"
+import { AuthFailureError, BadRequestError, ForbiddenErorr, } from "../core/error.responce.js"
+import ShopService from "./shop.service.js"
+import { CreateRSAToken } from "../utils/rsa.key.js"
+
 const RoleShop = {
     SHOP: 'SHOP',
     WRITER: 'WRITER',
@@ -11,80 +14,139 @@ const RoleShop = {
     ADMIN: 'ADMIN'
 }
 class AccessService {
+    static login = async ({ email, password, refreshToken = null }) => {
+        const foundShop = await ShopService.findByEmail({ email })
+        if (!foundShop) {
+            throw new BadRequestError(`Email or passowrd is invalid`)
+        }
+        //matchPassword
+
+        const match = await bcrypt.compare(password, foundShop.password)
+        if (!match) {
+            throw new AuthFailureError(`Email or passowrd is invalid`)
+        }
+
+        //create AT vs RT and save
+        const { publicKey, privateKey } = CreateRSAToken()
+        const tokens = await createTokenPair({
+            payload: {
+                userId: foundShop._id,
+                email
+            },
+            privateKey,
+            publicKey
+        })
+        await KeyTokenService.createToken({ userId: foundShop._id, privateKey, publicKey, refreshToken: tokens.refreshToken })
+
+        return {
+            shop: getIntoData({ fields: ['name', 'email', '_id'], object: foundShop }),
+            tokens
+        }
+
+
+
+    }
     static signUp = async ({ name, email, password }) => {
-        try {
-            //check email is exist
-            const holderShop = await shopeModel.findOne({ email }).lean()
-            if (holderShop) {
+        // try {
+        //check email is exist
+        const holderShop = await shopeModel.findOne({ email }).lean()
+        if (holderShop) {
+            throw new BadRequestError('Error: Shop already registed')
+        }
+
+        //hash password
+        const hashPassword = await bcrypt.hash(password, 10)
+        //create shop
+        const newShop = await shopeModel.create({
+            name: name, email, password: hashPassword, roles: [RoleShop.SHOP]
+        })
+        if (newShop) {
+            const { publicKey, privateKey } = CreateRSAToken()
+
+            //save collection KeyStore
+            const keyStore = await KeyTokenService.createToken({
+                userId: newShop._id,
+                publicKey,
+                privateKey
+            })
+
+            //check keystring
+            if (!keyStore) {
                 return {
                     code: 'xxxx',
-                    message: 'Shop already registered!'
+                    message: 'pubicKeyString error!'
                 }
             }
 
-            //hash password
-            const hashPassword = await bcrypt.hash(password, 10)
-            //create shop
-            const newShop = await shopeModel.create({
-                name: name, email, password: hashPassword, roles: [RoleShop.SHOP]
-            })
-            if (newShop) {
-                const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', {
-                    modulusLength: 2048,
-                    publicKeyEncoding: {
-                        type: 'spki',
-                        format: 'pem'
-                    },
-                    privateKeyEncoding: {
-                        type: 'pkcs8',
-                        format: 'pem'
-                    }
-                })
-
-                //save collection KeyStore
-                const keyStore = await KeyTokenService.createToken({
+            //create pair token
+            const tokens = await createTokenPair({
+                payload: {
                     userId: newShop._id,
-                    publicKey,
-                    privateKey
-                })
-
-                //check keystring
-                if (!keyStore) {
-                    return {
-                        code: 'xxxx',
-                        message: 'pubicKeyString error!'
-                    }
-                }
-
-                //create pair token
-                const tokens = await createTokenPair({
-                    payload: {
-                        userId: newShop._id,
-                        email
-                    },
-                    privateKey,
-                    publicKey
-                })
-                console.log(tokens)
-                return {
-                    code: 201,
-                    metadata: {
-                        shop: getIntoData({ fields: ['name', 'email', '_id'], object: newShop }),
-                        tokens
-                    }
-                }
-            }
+                    email
+                },
+                privateKey,
+                publicKey
+            })
+            console.log(tokens)
             return {
                 code: 201,
-                metadata: null
-            }
-        } catch (error) {
-            return {
-                code: 'xxx',
-                message: error.message,
-                status: 'error'
+                metadata: {
+                    shop: getIntoData({ fields: ['name', 'email', '_id'], object: newShop }),
+                    tokens
+                }
             }
         }
+        return {
+            code: 201,
+            metadata: null
+        }
+        // } catch (error) {
+        //     return {
+        //         code: 'xxx',
+        //         message: error.message,
+        //         status: 'error'
+        //     }
+        // }
+    }
+    static logOut = async (keyStore) => {
+        return await KeyTokenService.removeKeyById(keyStore)
+    }
+    static handlerRefreshToken = async (refreshToken) => {
+        const foundToken = await KeyTokenService.findByRefreshTokenUsed(refreshToken)
+        if (foundToken) {
+            const { userId, email } = await verifyJWT(refreshToken, foundToken.privateKey)
+            console.log(userId, email)
+            await KeyTokenService.removeKeyByUserId(userId)
+            throw new ForbiddenErorr('Something wrong happend!! Please relogin')
+        }
+        const holderToken = await KeyTokenService.findByRefreshToken(refreshToken)
+        if (!holderToken) throw new AuthFailureError('Shop not registered')
+
+        const { userId, email } = await verifyJWT(refreshToken, holderToken.privateKey)
+        const foundShop = await ShopService.findByEmail({ email })
+        if (!foundShop) throw new AuthFailureError('Shop not registered')
+
+        const tokens = await createTokenPair({
+            payload: {
+                userId,
+                email
+            },
+            privateKey: holderToken.publicKey,
+            privateKey: holderToken.privateKey
+        })
+        await holderToken.updateOne({
+            $set: {
+                refreshToken: tokens.refreshToken,
+            },
+            $addToSet: {
+                refreshTokensUsed: refreshToken
+            }
+        })
+        return {
+            shop: getIntoData({ fields: ['name', 'email', '_id'], object: foundShop }),
+            tokens
+        }
+
     }
 }
 
