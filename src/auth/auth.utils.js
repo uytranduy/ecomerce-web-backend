@@ -5,7 +5,8 @@ import KeyTokenService from '../services/keytoken.service.js'
 const HEADER = {
     API_KEY: 'x-api-key',
     AUTHORIZATION: 'authorization',
-    CLIENT_ID: 'x-client-id'
+    CLIENT_ID: 'x-client-id',
+    REFRESHTOKEN: 'refreshtoken'
 }
 
 const createTokenPair = async ({ payload, publicKey, privateKey }) => {
@@ -45,14 +46,38 @@ const authentication = asyncHandler(
 
         const accessToken = req.headers[HEADER.AUTHORIZATION]
         if (!accessToken) throw new AuthFailureError('Invalid Request')
-
         try {
             const encoded = jwt.verify(accessToken, keystore.publicKey)
             if (encoded.userId.toString() !== userId) throw new AuthFailureError('Invalid Userid')
             req.keystore = keystore
+            req.user = encoded
             return next()
         } catch (error) {
             throw new AuthFailureError('Invalid Token')
+        }
+    }
+)
+const refreshAuthentication = asyncHandler(
+    async (req, res, next) => {
+        const userId = req.headers[HEADER.CLIENT_ID]
+        if (!userId) throw new AuthFailureError('Invalid Request')
+
+        const keystore = await KeyTokenService.findByUserId({ userId })
+        if (!keystore) throw new NotFound('Not found keystore')
+
+        if (req.headers[HEADER.REFRESHTOKEN]) {
+            try {
+                const refreshToken = req.headers[HEADER.REFRESHTOKEN]
+                const encoded = jwt.verify(refreshToken, keystore.privateKey)
+                if (encoded.userId.toString() !== userId) throw new AuthFailureError('Invalid Userid')
+
+                req.keyStore = keystore
+                req.user = encoded
+                req.refreshToken = refreshToken
+                return next()
+            } catch (error) {
+                throw new AuthFailureError('Invalid Token')
+            }
         }
     }
 )
@@ -62,5 +87,6 @@ const verifyJWT = async (refreshToken, privateKey) => {
 export {
     createTokenPair,
     authentication,
-    verifyJWT
+    verifyJWT,
+    refreshAuthentication
 }

@@ -16,7 +16,7 @@ class KeyTokenService {
         return tokens ? tokens.publicKey : null
     }
     static findByUserId = async ({ userId }) => {
-        const key = await keytokenModel.findOne({ user: userId }).lean()
+        const key = await keytokenModel.findOne({ user: userId })
         console.log(key)
         return key
     }

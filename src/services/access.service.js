@@ -100,29 +100,21 @@ class AccessService {
             code: 201,
             metadata: null
         }
-        // } catch (error) {
-        //     return {
-        //         code: 'xxx',
-        //         message: error.message,
-        //         status: 'error'
-        //     }
-        // }
     }
     static logOut = async (keyStore) => {
         return await KeyTokenService.removeKeyById(keyStore)
     }
-    static handlerRefreshToken = async (refreshToken) => {
-        const foundToken = await KeyTokenService.findByRefreshTokenUsed(refreshToken)
-        if (foundToken) {
-            const { userId, email } = await verifyJWT(refreshToken, foundToken.privateKey)
-            console.log(userId, email)
+    static handlerRefreshToken = async ({ refreshToken, user, keyStore }) => {
+        const { userId, email } = user
+
+        if (keyStore.refreshTokensUsed.includes(refreshToken)) {
             await KeyTokenService.removeKeyByUserId(userId)
             throw new ForbiddenErorr('Something wrong happend!! Please relogin')
         }
-        const holderToken = await KeyTokenService.findByRefreshToken(refreshToken)
-        if (!holderToken) throw new AuthFailureError('Shop not registered')
 
-        const { userId, email } = await verifyJWT(refreshToken, holderToken.privateKey)
+        if (keyStore.refreshToken !== refreshToken) {
+            throw new AuthFailureError('Shop not registered')
+        }
         const foundShop = await ShopService.findByEmail({ email })
         if (!foundShop) throw new AuthFailureError('Shop not registered')
 
@@ -131,10 +123,10 @@ class AccessService {
                 userId,
                 email
             },
-            privateKey: holderToken.publicKey,
-            privateKey: holderToken.privateKey
+            publicKey: keyStore.publicKey,
+            privateKey: keyStore.privateKey
         })
-        await holderToken.updateOne({
+        await keyStore.updateOne({
             $set: {
                 refreshToken: tokens.refreshToken,
             },
@@ -146,7 +138,6 @@ class AccessService {
             shop: getIntoData({ fields: ['name', 'email', '_id'], object: foundShop }),
             tokens
         }
-
     }
 }
 
