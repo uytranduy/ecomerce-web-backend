@@ -1,6 +1,6 @@
 import { BadRequestError } from "../core/error.responce.js"
 import { clothing, electronic, furniture, product } from "../models/product.model.js"
-import { findAllDraftsForShop } from "../models/repositories/product.repo.js"
+import { findAllDraftsForShop, publishProductByShop, findAllPublishForShop, unPublishProductByShop, searchProductByUser, findAllProductsRepo, findOneProductRepo, updateProductByIdRepo } from "../models/repositories/product.repo.js"
 
 
 class ProductFactory {
@@ -15,10 +15,39 @@ class ProductFactory {
         return new productClass(payload).createProduct()
     }
 
+    static async updateProduct(type, product_id, payload) {
+        const productClass = ProductFactory.productRegistery[type]
+        if (!productClass) throw new BadRequestError(`Invalid product type, ${type}`)
+        return new productClass(payload).updateProduct(product_id)
+    }
+
+
+    //put
+    static async publishProductByShop({ product_shop, product_id }) {
+        return await publishProductByShop({ product_shop, product_id })
+    }
+    static async unPublishProductByShop({ product_shop, product_id }) {
+        return await unPublishProductByShop({ product_shop, product_id })
+    }
     //query
     static async findAllDraftsForShop({ product_shop, limit = 50, skip = 0 }) {
         const query = { product_shop, isDraft: true }
         return await findAllDraftsForShop({ query, limit, skip })
+    }
+    static async findAllPublishForShop({ product_shop, limit = 50, skip = 0 }) {
+        const query = { product_shop, isPublished: true }
+        return await findAllPublishForShop({ query, limit, skip })
+    }
+    static async searchProductByUser({ keySearch }) {
+        return await searchProductByUser({ keySearch })
+    }
+    static async findAllProducts({ filter = { isPublished: true }, page = 1, limit = 50, sort = 'ctime', select = ['product_name', 'product_price', 'product_thumb'] }) {
+        return await findAllProductsRepo({
+            filter, page, limit, sort, select
+        })
+    }
+    static async findOneProduct({ product_id, unselect = ['__v'] }) {
+        return await findOneProductRepo({ product_id, unselect })
     }
 }
 /*
@@ -51,8 +80,15 @@ class Product {
         this.product_shop = product_shop
         this.product_attributes = product_attributes
     }
-    async createProduct(product_id) {
-        return await product.create({ ...this, _id: product_id })
+    async createProduct(productId) {
+        return await product.create({ ...this, _id: productId })
+    }
+    async updateProduct(productId) {
+        return await updateProductByIdRepo({
+            productId,
+            payload: this,
+            updateModel: product
+        })
     }
 }
 
@@ -68,6 +104,20 @@ class Clothing extends Product {
         if (!newProduct) throw new BadRequestError('Create new Product error')
 
         return newProduct
+    }
+    async updateProduct(productId) {
+
+        if (this.product_attributes) {
+            const updatedClothing = await updateProductByIdRepo({
+                productId: productId,
+                payload: this.product_attributes,
+                updateModel: clothing
+            })
+            if (!updatedClothing) throw new BadRequestError('Update clothing error')
+        }
+        const updatedProduct = await super.updateProduct(productId)
+        if (!updatedProduct) throw new BadRequestError('Update product error')
+        return updatedProduct
     }
 }
 

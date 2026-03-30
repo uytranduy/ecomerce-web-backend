@@ -27,6 +27,18 @@ instanceMongoDb
 app.use(router)
 
 //handling error
+app.use((err, req, res, next) => {
+    console.error("=== ERROR START ===")
+    console.error("Message:", err.message)
+    console.error("Stack:", err.stack)
+    console.error("=== ERROR END ===")
+
+    return res.status(err.status || 500).json({
+        status: "error",
+        code: err.status || 500,
+        message: err.message
+    })
+})
 app.use((req, res, next) => {
     const error = new Error('Not Found')
     error.status = 404
@@ -40,6 +52,7 @@ app.use((error, req, res, next) => {
         message: error.message || 'Internal Server Error'
     })
 })
+
 
 
 export default app
