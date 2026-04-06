@@ -1,22 +1,23 @@
 import { BadRequestError } from "../core/error.responce.js"
+import { insertInventory } from "../models/repositories/inventory.repo.js"
 import { clothing, electronic, furniture, product } from "../models/product.model.js"
 import { findAllDraftsForShop, publishProductByShop, findAllPublishForShop, unPublishProductByShop, searchProductByUser, findAllProductsRepo, findOneProductRepo, updateProductByIdRepo } from "../models/repositories/product.repo.js"
 
 
 class ProductFactory {
-    static productRegistery = {}
+    static productRegistry = {}
 
     static registerProductType(type, classRef) {
-        ProductFactory.productRegistery[type] = classRef
+        ProductFactory.productRegistry[type] = classRef
     }
     static async createProduct(type, payload) {
-        const productClass = ProductFactory.productRegistery[type]
+        const productClass = ProductFactory.productRegistry[type]
         if (!productClass) throw new BadRequestError(`Invalid product type, ${type}`)
         return new productClass(payload).createProduct()
     }
 
     static async updateProduct(type, product_id, payload) {
-        const productClass = ProductFactory.productRegistery[type]
+        const productClass = ProductFactory.productRegistry[type]
         if (!productClass) throw new BadRequestError(`Invalid product type, ${type}`)
         return new productClass(payload).updateProduct(product_id)
     }
@@ -81,7 +82,13 @@ class Product {
         this.product_attributes = product_attributes
     }
     async createProduct(productId) {
-        return await product.create({ ...this, _id: productId })
+        const newProduct = await product.create({ ...this, _id: productId })
+        if (!newProduct) throw new BadRequestError('Create new Product error')
+        return await insertInventory({
+            productId: newProduct._id,
+            stock: this.product_quantity,
+            shopId: this.product_shop,
+        })
     }
     async updateProduct(productId) {
         return await updateProductByIdRepo({
@@ -134,6 +141,20 @@ class Electronic extends Product {
 
         return newProduct
     }
+    async updateProduct(productId) {
+
+        if (this.product_attributes) {
+            const updatedElectronic = await updateProductByIdRepo({
+                productId: productId,
+                payload: this.product_attributes,
+                updateModel: electronic
+            })
+            if (!updatedElectronic) throw new BadRequestError('Update electronic product error')
+        }
+        const updatedProduct = await super.updateProduct(productId)
+        if (!updatedProduct) throw new BadRequestError('Update product error')
+        return updatedProduct
+    }
 }
 
 class Furniture extends Product {
@@ -142,12 +163,25 @@ class Furniture extends Product {
             ...this.product_attributes,
             product_shop: this.product_shop
         })
-        if (!newFurniture) throw new BadRequestError('Create new Clothing error')
+        if (!newFurniture) throw new BadRequestError('Create new Furniture error')
 
         const newProduct = await super.createProduct(newFurniture._id)
-        if (!newProduct) throw new BadRequestError('Create new Product error')
 
         return newProduct
+    }
+    async updateProduct(productId) {
+
+        if (this.product_attributes) {
+            const updatedFurniture = await updateProductByIdRepo({
+                productId: productId,
+                payload: this.product_attributes,
+                updateModel: furniture
+            })
+            if (!updatedFurniture) throw new BadRequestError('Update Furniture product error')
+        }
+        const updatedProduct = await super.updateProduct(productId)
+        if (!updatedProduct) throw new BadRequestError('Update product error')
+        return updatedProduct
     }
 }
 

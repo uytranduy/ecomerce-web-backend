@@ -87,6 +87,9 @@ const updateProductByIdRepo = async ({ productId, payload, updateModel }) => {
     )
     return productUpdated
 }
+const getProductById = async (productId) => {
+    return await product.findOne({ _id: productId })
+}
 export {
     findAllDraftsForShop,
     publishProductByShop,
@@ -96,5 +99,6 @@ export {
     findAllProductsRepo,
     findOneProductRepo,
     updateProductByIdRepo,
-    queryProduct
+    queryProduct,
+    getProductById
 }
